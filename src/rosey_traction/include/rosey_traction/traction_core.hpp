@@ -1,5 +1,6 @@
 // Per-cycle traction logic, without ROS. traction_node gathers the inputs from topics and
-// calls TractionCore::step once per timer tick; Phase 3's replay harness calls it directly.
+// calls TractionCore::step once per timer tick; the replay harness (test/replay_scenario.hpp)
+// calls it directly.
 //
 // Per wheel (wheels are matched to telemetry by joint name in the node, never by index):
 //   T   = Kt * (|I| - I0) * sign(omega)

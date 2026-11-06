@@ -72,18 +72,53 @@ public:
     timer_ = create_wall_timer(
       std::chrono::duration_cast<std::chrono::nanoseconds>(period), [this]() {onTimer();});
 
+    // Only "enabled" can change at runtime (ros2 param set /traction_node enabled true), so the
+    // closed loop can be switched on and off without a restart. Everything else needs a restart.
+    param_check_ = add_on_set_parameters_callback(
+      [](const std::vector<rclcpp::Parameter> & params) {
+        rcl_interfaces::msg::SetParametersResult result;
+        result.successful = true;
+        for (const auto & p : params) {
+          if (p.get_name() == "enabled" && p.get_type() == rclcpp::ParameterType::PARAMETER_BOOL) {
+            continue;
+          }
+          result.successful = false;
+          result.reason = "only 'enabled' (bool) can change at runtime; restart to change '" +
+            p.get_name() + "'";
+        }
+        return result;
+      });
+    param_apply_ = add_post_set_parameters_callback(
+      [this](const std::vector<rclcpp::Parameter> & params) {
+        for (const auto & p : params) {
+          if (p.get_name() == "enabled") {
+            core_->setEnabled(p.as_bool());
+            logMode();
+          }
+        }
+      });
+
     RCLCPP_INFO(
-      get_logger(), "traction_node: %zu wheels, %.1f Hz, imu '%s', mass %.2f kg, %s",
-      config.wheels.size(), rate_hz_, imu_topic_.c_str(), config.mass_kg,
-      config.limiter.enabled ? "ENABLED" : "monitor mode");
+      get_logger(), "traction_node: %zu wheels, %.1f Hz, imu '%s', mass %.2f kg",
+      config.wheels.size(), rate_hz_, imu_topic_.c_str(), config.mass_kg);
+    logMode();
   }
 
 private:
+  void logMode()
+  {
+    if (core_->config().limiter.enabled) {
+      RCLCPP_WARN(get_logger(), "closed loop ENABLED: linear.x is scaled by the traction limiter");
+    } else {
+      RCLCPP_INFO(get_logger(), "monitor mode: estimates only, commands pass through unchanged");
+    }
+  }
+
   CoreConfig loadConfig()
   {
     CoreConfig c;
 
-    bool enabled = declare_parameter("enabled", false);
+    const bool enabled = declare_parameter("enabled", false);
     rate_hz_ = declare_parameter("rate_hz", 10.0);
     const auto joint_names = declare_parameter(
       "joint_names", std::vector<std::string>{
@@ -125,13 +160,6 @@ private:
     p.c3 = declare_parameter("soil.c3", p.c3);
     p.n_int = static_cast<int>(declare_parameter("n_int", static_cast<int64_t>(p.n_int)));
 
-    // Phase 2 runs in monitor mode only. The closed loop is enabled in Phase 3.
-    if (enabled) {
-      RCLCPP_WARN(
-        get_logger(), "enabled: true is not supported yet (Phase 2, monitor mode only); "
-        "ignoring it, scale stays 1");
-      enabled = false;
-    }
     c.limiter.enabled = enabled;
 
     if (joint_names.size() != kt.size() || joint_names.size() != i0.size()) {
@@ -325,6 +353,8 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr cmd_pub_;
   rclcpp::Publisher<rosey_traction_msgs::msg::TractionState>::SharedPtr state_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
+  rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr param_check_;
+  rclcpp::node_interfaces::PostSetParametersCallbackHandle::SharedPtr param_apply_;
 };
 
 }  // namespace rosey_traction

@@ -76,8 +76,9 @@ if(BUILD_TESTING)
   ament_add_gtest(software_slip_table test/test_slip_table.cpp)
   ament_add_gtest(software_traction_limiter test/test_traction_limiter.cpp)
   ament_add_gtest(software_traction_core test/test_traction_core.cpp)
+  ament_add_gtest(software_traction_replay test/test_traction_replay.cpp)
   foreach(t software_terramechanics software_slip_estimator software_slip_table
-      software_traction_limiter software_traction_core)
+      software_traction_limiter software_traction_core software_traction_replay)
     target_link_libraries(${t} rosey_traction_core)
     target_compile_definitions(${t} PRIVATE TEST_DATA_DIR="${TEST_DATA_DIR}")
   endforeach()
@@ -85,6 +86,10 @@ if(BUILD_TESTING)
   # Timing check, run by hand: build/rosey_traction/bench_estimator
   add_executable(bench_estimator test/bench_estimator.cpp)
   target_link_libraries(bench_estimator rosey_traction_core)
+
+  # Slip-ramp replay trace for checking and tuning, run by hand: build/rosey_traction/replay_sim
+  add_executable(replay_sim test/replay_sim.cpp)
+  target_link_libraries(replay_sim rosey_traction_core)
 endif()
 
 ament_export_include_directories(include/${PROJECT_NAME})

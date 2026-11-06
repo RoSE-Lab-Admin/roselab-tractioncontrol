@@ -144,7 +144,6 @@ TEST(TractionCore, MonitorModeFlagsLimitingButKeepsScaleOne)
 
 TEST(TractionCore, EnabledLimiterReducesScale)
 {
-  // The node keeps enabled = false until Phase 3; the core already supports it.
   const auto c = makeConfig(true);
   const double s_high = rosey_traction::sMax(wheelLoad(c)) + 0.1;
   TractionCore core(c);
