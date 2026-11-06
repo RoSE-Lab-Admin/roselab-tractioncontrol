@@ -1,8 +1,10 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, RegisterEventHandler
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, RegisterEventHandler
 from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
-from launch.substitutions import Command, FindExecutable, PathJoinSubstitution, LaunchConfiguration
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import (
+    Command, FindExecutable, IfElseSubstitution, PathJoinSubstitution, LaunchConfiguration)
 
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
@@ -17,6 +19,11 @@ def generate_launch_description():
     ])
 
     use_mock_hardware = LaunchConfiguration('use_mock_hardware')
+    traction = LaunchConfiguration('traction')
+
+    # traction:=true puts traction_node between /cmd_vel and the drive controller.
+    base_controller_cmd_vel = IfElseSubstitution(
+        traction, if_value='/traction/cmd_vel', else_value='/cmd_vel')
 
     robot_description_content = ParameterValue(Command([
         FindExecutable(name='xacro'),
@@ -66,8 +73,17 @@ def generate_launch_description():
             "--param-file",
             robot_controllers,
             "--controller-ros-args",
-            "-r /roseybot_base_controller/cmd_vel:=/cmd_vel",
+            ["-r /roseybot_base_controller/cmd_vel:=", base_controller_cmd_vel],
         ],
+    )
+
+    traction_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(PathJoinSubstitution([
+            FindPackageShare('rosey_traction'),
+            'launch',
+            'traction.launch.py',
+        ])),
+        condition=IfCondition(traction),
     )
 
     nodes = [
@@ -75,10 +91,15 @@ def generate_launch_description():
             'use_mock_hardware',
             default_value='false',
             description='Use mock_components/GenericSystem instead of the Teensy hardware'),
+        DeclareLaunchArgument(
+            'traction',
+            default_value='false',
+            description='Start rosey_traction and route /cmd_vel through it'),
         control_node,
         robot_state_pub_node,
         joint_state_broadcaster_spawner,
-        robot_controller_spawner
+        robot_controller_spawner,
+        traction_launch
     ]
 
     return LaunchDescription(nodes)

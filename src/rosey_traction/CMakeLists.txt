@@ -5,7 +5,19 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
+# find dependencies (the node only; the core library has no ROS dependencies)
+set(NODE_DEPENDS
+  control_msgs
+  geometry_msgs
+  rclcpp
+  rosey_traction_msgs
+  sensor_msgs
+)
+
 find_package(ament_cmake REQUIRED)
+foreach(Dependency IN ITEMS ${NODE_DEPENDS})
+  find_package(${Dependency} REQUIRED)
+endforeach()
 
 # The estimator runs every cycle on the Pi; build optimized unless told otherwise.
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -20,12 +32,18 @@ add_library(
   src/slip_estimator.cpp
   src/slip_table_lookup.cpp
   src/traction_limiter.cpp
+  src/traction_core.cpp
 )
 target_compile_features(rosey_traction_core PUBLIC cxx_std_17)
 target_include_directories(rosey_traction_core PUBLIC
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
   $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
+
+## NODE
+add_executable(traction_node src/traction_node.cpp)
+target_link_libraries(traction_node rosey_traction_core)
+ament_target_dependencies(traction_node ${NODE_DEPENDS})
 
 ## INSTALL
 install(
@@ -39,6 +57,14 @@ install(
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
+install(
+  TARGETS traction_node
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(
+  DIRECTORY config launch
+  DESTINATION share/${PROJECT_NAME}
+)
 
 ## TESTS (ctest names start with software_ to match the CI filter on main)
 if(BUILD_TESTING)
@@ -49,7 +75,9 @@ if(BUILD_TESTING)
   ament_add_gtest(software_slip_estimator test/test_slip_estimator.cpp)
   ament_add_gtest(software_slip_table test/test_slip_table.cpp)
   ament_add_gtest(software_traction_limiter test/test_traction_limiter.cpp)
-  foreach(t software_terramechanics software_slip_estimator software_slip_table software_traction_limiter)
+  ament_add_gtest(software_traction_core test/test_traction_core.cpp)
+  foreach(t software_terramechanics software_slip_estimator software_slip_table
+      software_traction_limiter software_traction_core)
     target_link_libraries(${t} rosey_traction_core)
     target_compile_definitions(${t} PRIVATE TEST_DATA_DIR="${TEST_DATA_DIR}")
   endforeach()

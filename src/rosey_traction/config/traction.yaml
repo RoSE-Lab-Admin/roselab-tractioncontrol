@@ -1,0 +1,33 @@
+traction_node:
+  ros__parameters:
+    enabled: false                 # monitor mode until validated (Phase 2 forces false)
+    rate_hz: 10.0
+    joint_names: [front_left_wheel_joint, front_right_wheel_joint, back_left_wheel_joint, back_right_wheel_joint]
+    imu_topic: "/imu/data"         # confirmed in Phase 0 (um7_driver.cpp:386, sensor_msgs/Imu)
+    mass_kg: 16.01                 # confirmed by Ayo 2026-11-04
+    gravity: 9.81
+    # Motor model, per joint, same order as joint_names. Kt is the wheel torque per amp
+    # (confirmed by the project manager), so no gear ratio is applied.
+    # PLACEHOLDERS: mean of the bench fit (Motor 1..4 = 1.61, 1.85, 1.88, 1.74 N*m/A).
+    # Wheel characterization will replace these.
+    kt_nm_per_a: [1.77, 1.77, 1.77, 1.77]
+    i0_a: [0.15, 0.15, 0.15, 0.15]
+    omega_min: 0.05                # rad/s, below this no estimate
+    turn_bypass_threshold: 0.05    # rad/s
+    kp: 2.0                        # PLACEHOLDER gains, tune in Phase 5
+    ki: 0.5
+    ki_bleed: 1.0
+    k_min: 0.2
+    stale_timeout: 0.5             # s, /dynamic_joint_states age limit
+    frozen_cycles: 10              # identical telemetry messages while moving
+    cmd_timeout: 0.5               # s, matches diff_drive cmd_vel_timeout
+    imu_timeout: 0.5               # s
+    # Reported pitch only (load uses the full tilt). Settle in the Phase 4 tilt test.
+    pitch_axis: "pitch"            # "pitch" or "roll"
+    pitch_sign: 1.0                # REP-103: positive pitch = nose down
+    # Terramechanics (RoSEy wheel + Ding soil), same as the Octave script.
+    # r = 0.1515 m is the model radius (Hopkins); diff_drive uses wheel_radius 0.150. Kept separate.
+    wheel: {r: 0.1515, b: 0.05158, h: 0.013, lambda_s: 0.5}
+    soil:  {kc: 15.6, kphi: 2407.4, n0: 0.81, n1: 1.16, c: 250.0, phi_deg: 31.9, K: 0.011,
+            c1: 0.5, c2: -0.3, c3: 0.0}
+    n_int: 60
