@@ -264,3 +264,68 @@ TEST(TractionCore, ImuTiltScalesLoadAndStaleImuUsesFlat)
   EXPECT_DOUBLE_EQ(out.pitch, 0.0);
   EXPECT_TRUE(hasWarning(out, "imu stale"));
 }
+
+TEST(TractionCore, FrozenWhenCommandedButTelemetryStuck)
+{
+  // Telemetry stuck at zero while the rover is told to drive counts as frozen.
+  const auto c = makeConfig();
+  TractionCore core(c);
+  auto in = makeInput(0.0, 0.0);
+  in.cmd_linear_x = 0.2;
+  CycleOutput out;
+  for (int i = 0; i < c.frozen_cycles; ++i) {
+    out = core.step(in);
+    EXPECT_FALSE(hasWarning(out, "frozen")) << "message " << i;
+  }
+  out = core.step(in);
+  EXPECT_TRUE(hasWarning(out, "frozen"));
+
+  // Below moving_cmd_min it is just a stopped rover.
+  TractionCore core2(c);
+  in.cmd_linear_x = 0.5 * c.moving_cmd_min;
+  for (int i = 0; i < 3 * c.frozen_cycles; ++i) {
+    EXPECT_FALSE(hasWarning(core2.step(in), "frozen"));
+  }
+}
+
+TEST(TractionCore, TorqueTermBacksUpInvalidEstimate)
+{
+  // Torque well above T(W, 0.9): the estimator gives up, the torque term still limits.
+  const auto c = makeConfig(true);
+  const auto t_09 = rosey_traction::torqueAt(wheelLoad(c), 0.9, c.model);
+  ASSERT_TRUE(t_09.has_value());
+  const double current = 1.3 * *t_09 / c.wheels[0].kt + c.wheels[0].i0;
+  TractionCore core(c);
+  const auto out = core.step(makeInput(1.0, current));
+  for (const auto & w : out.wheels) {
+    EXPECT_FALSE(w.estimate_valid);
+    EXPECT_TRUE(w.limiting);
+  }
+  EXPECT_GT(out.error, 0.0);
+  EXPECT_LT(out.scale, 1.0);
+}
+
+TEST(TractionCore, TorqueAndSlipTermsAgreeInSign)
+{
+  // The basis for "the torque term mainly backs up an invalid estimate": T rises with s, so
+  // T > t_max exactly when s > s_max, for the loads the rover sees (flat to 30 deg tilt).
+  const auto c = makeConfig();
+  for (double tilt_cos : {1.0, std::cos(15.0 * rosey_traction::kDegToRad),
+      std::cos(30.0 * rosey_traction::kDegToRad)})
+  {
+    const double w = wheelLoad(c) * tilt_cos;
+    const double s_max = rosey_traction::sMax(w);
+    const auto t_max = rosey_traction::torqueAt(w, s_max, c.model);
+    ASSERT_TRUE(t_max.has_value());
+    double t_prev = -1.0;
+    for (double s = 0.02; s <= 0.9; s += 0.02) {
+      const auto t = rosey_traction::torqueAt(w, s, c.model);
+      ASSERT_TRUE(t.has_value());
+      EXPECT_GT(*t, t_prev) << "W=" << w << " s=" << s;
+      if (std::abs(s - s_max) > 1e-3) {
+        EXPECT_EQ(*t > *t_max, s > s_max) << "W=" << w << " s=" << s;
+      }
+      t_prev = *t;
+    }
+  }
+}

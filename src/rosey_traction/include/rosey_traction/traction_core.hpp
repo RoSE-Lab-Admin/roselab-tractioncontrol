@@ -14,16 +14,24 @@
 //   - |I| <= I0: no driving torque (mock hardware reports current = 0 here)
 //   - the estimator fails
 //
-// Slip error, per valid wheel, in slip units:
-//   e_i = max(s_i - s_max_i, (T_i - t_max_i) / t_max_i * s_max_i)
+// Slip error, per wheel with a usable torque (forward, |omega| >= omega_min, |I| > I0), in slip units:
+//   torque term  e_T = (T_i - t_max_i) / t_max_i * s_max_i
+//   slip term    e_s = s_i - s_max_i                     (only if the estimate is valid)
+//   e_i = max(e_T, e_s), or e_T alone when the estimate is invalid
 // The torque term is the fractional torque excess over t_max scaled by s_max, so being 10%
-// over t_max at s_max = 0.2 counts like being 0.02 over s_max. e = max over valid wheels,
-// NaN when no wheel has a valid estimate (the limiter then bleeds its integrator).
+// over t_max at s_max = 0.2 counts like being 0.02 over s_max.
+// The torque term mainly backs up an invalid estimate. T rises with s, so with a valid estimate
+// T > t_max and s > s_max happen together and the two terms agree in sign. The estimator fails
+// most often at very high slip (T above T(W, 0.9)), and there the torque term still reports the
+// excess instead of going silent.
+// e = max over wheels, NaN when no wheel has a usable torque (the limiter then bleeds its
+// integrator).
 //
 // Frozen telemetry: on a serial timeout the hardware read() keeps its old values, so the
-// broadcaster keeps publishing the same numbers. If, while some wheel is moving
-// (|omega| >= omega_min), frozen_cycles consecutive new messages carry exactly the same
-// velocity and current for every wheel, the telemetry is treated as frozen.
+// broadcaster keeps publishing the same numbers. If, while the rover is moving (some wheel
+// has |omega| >= omega_min, or the command has |linear.x| > moving_cmd_min), frozen_cycles
+// consecutive new messages carry exactly the same velocity and current for every wheel, the
+// telemetry is treated as frozen.
 //
 // Scale k:
 //   - telemetry stale or frozen: k = 1, limiter reset
@@ -58,6 +66,7 @@ struct CoreConfig
   double gravity = 9.81;
   double omega_min = 0.05;              // [rad/s]
   double turn_bypass_threshold = 0.05;  // [rad/s]
+  double moving_cmd_min = 0.01;         // [m/s], command above this counts as moving (frozen guard)
   int frozen_cycles = 10;
   LimiterConfig limiter;
   Params model;
@@ -82,6 +91,7 @@ struct CycleInput
   double tilt_cos = 1.0;           // body z axis . world z axis, from the IMU
   double pitch = 0.0;              // [rad], reported only
   bool have_command = false;       // a /cmd_vel arrived within cmd_timeout
+  double cmd_linear_x = 0.0;       // [m/s]
   double cmd_angular_z = 0.0;      // [rad/s]
   double dt = 0.0;                 // time since the last step [s]
 };
@@ -98,7 +108,7 @@ struct WheelOutput
   double s_max;
   double t_max;         // NaN when the model has no solution at this load
   bool estimate_valid = false;
-  bool limiting = false;
+  bool limiting = false;   // this wheel's error e_i > 0
 };
 
 struct CycleOutput
@@ -122,6 +132,7 @@ public:
   CycleOutput step(const CycleInput & in);
 
   void reset();
+  void setEnabled(bool enabled);
   const CoreConfig & config() const {return config_;}
   const TractionLimiter & limiter() const {return limiter_;}
 

@@ -14,13 +14,14 @@ traction_node:
     i0_a: [0.15, 0.15, 0.15, 0.15]
     omega_min: 0.05                # rad/s, below this no estimate
     turn_bypass_threshold: 0.05    # rad/s
+    moving_cmd_min: 0.01           # m/s, |linear.x| above this counts as moving for the frozen guard
     kp: 2.0                        # PLACEHOLDER gains, tune in Phase 5
     ki: 0.5
     ki_bleed: 1.0
     k_min: 0.2
     stale_timeout: 0.5             # s, /dynamic_joint_states age limit
     frozen_cycles: 10              # identical telemetry messages while moving
-    cmd_timeout: 0.5               # s, matches diff_drive cmd_vel_timeout
+    cmd_timeout: 0.5               # s, output is zero no later than this after the last /cmd_vel
     imu_timeout: 0.5               # s
     # Reported pitch only (load uses the full tilt). Settle in the Phase 4 tilt test.
     pitch_axis: "pitch"            # "pitch" or "roll"

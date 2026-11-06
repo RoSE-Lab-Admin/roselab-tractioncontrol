@@ -6,7 +6,10 @@
 //   imu_topic (Imu)        ─┘
 //
 // The output command is published on every timer tick from the latest input, restamped with the
-// current time. If no input arrived for cmd_timeout, zero velocity is published instead.
+// current time. The output goes to zero no later than cmd_timeout after the last input: the
+// input counts as fresh only while it is at most (cmd_timeout - one timer period) old, so the
+// last non-zero output is never older than cmd_timeout. Restamping means diff_drive's own
+// cmd_vel_timeout no longer catches a silent input, so this check is the one that does.
 //
 // IMU convention. The UM7 publishes on imu_link, which is mounted aligned with base_link
 // (URDF rpy 0 0 0), with the orientation converted to ENU (tf_ned_to_enu: true). In REP-103
@@ -93,6 +96,7 @@ private:
     const auto i0 = declare_parameter("i0_a", std::vector<double>{0.15, 0.15, 0.15, 0.15});
     c.omega_min = declare_parameter("omega_min", 0.05);
     c.turn_bypass_threshold = declare_parameter("turn_bypass_threshold", 0.05);
+    c.moving_cmd_min = declare_parameter("moving_cmd_min", 0.01);
     c.limiter.kp = declare_parameter("kp", 2.0);
     c.limiter.ki = declare_parameter("ki", 0.5);
     c.limiter.ki_bleed = declare_parameter("ki_bleed", 1.0);
@@ -139,7 +143,9 @@ private:
     }
     if (!(rate_hz_ > 0.0)) {throw std::invalid_argument("rate_hz must be > 0");}
     if (!(stale_timeout_ > 0.0)) {throw std::invalid_argument("stale_timeout must be > 0");}
-    if (!(cmd_timeout_ > 0.0)) {throw std::invalid_argument("cmd_timeout must be > 0");}
+    if (!(cmd_timeout_ > 1.0 / rate_hz_)) {
+      throw std::invalid_argument("cmd_timeout must be longer than one timer period");
+    }
     if (!(imu_timeout_ > 0.0)) {throw std::invalid_argument("imu_timeout must be > 0");}
     if (pitch_axis_ != "pitch" && pitch_axis_ != "roll") {
       throw std::invalid_argument("pitch_axis must be \"pitch\" or \"roll\"");
@@ -228,7 +234,9 @@ private:
     in.imu_fresh = within(last_imu_time_, t, imu_timeout_);
     in.tilt_cos = tilt_cos_;
     in.pitch = pitch_;
-    in.have_command = last_cmd_.has_value() && within(last_cmd_time_, t, cmd_timeout_);
+    in.have_command = last_cmd_.has_value() &&
+      within(last_cmd_time_, t, cmd_timeout_ - 1.0 / rate_hz_);
+    in.cmd_linear_x = in.have_command ? last_cmd_->twist.linear.x : 0.0;
     in.cmd_angular_z = in.have_command ? last_cmd_->twist.angular.z : 0.0;
     in.dt = dt;
 

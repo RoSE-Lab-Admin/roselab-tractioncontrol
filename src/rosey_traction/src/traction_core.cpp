@@ -28,6 +28,7 @@ std::string CoreConfig::validate() const
   if (!(gravity > 0.0)) {return "gravity must be > 0";}
   if (!(omega_min >= 0.0)) {return "omega_min must be >= 0";}
   if (!(turn_bypass_threshold >= 0.0)) {return "turn_bypass_threshold must be >= 0";}
+  if (!(moving_cmd_min >= 0.0)) {return "moving_cmd_min must be >= 0";}
   if (frozen_cycles < 1) {return "frozen_cycles must be >= 1";}
   if (!(limiter.kp >= 0.0)) {return "kp must be >= 0";}
   if (!(limiter.ki > 0.0)) {return "ki must be > 0";}
@@ -64,12 +65,20 @@ void TractionCore::reset()
   frozen_count_ = 0;
 }
 
+void TractionCore::setEnabled(bool enabled)
+{
+  config_.limiter.enabled = enabled;
+  limiter_.setEnabled(enabled);
+}
+
 bool TractionCore::updateFrozen(const CycleInput & in)
 {
   if (!in.joints_new) {
     return frozen_count_ >= config_.frozen_cycles;
   }
-  bool moving = false;
+  // Moving: a wheel turns, or a forward/backward command is active. The second case catches
+  // telemetry that froze at zero while the rover was told to drive.
+  bool moving = in.have_command && std::abs(in.cmd_linear_x) > config_.moving_cmd_min;
   bool identical = true;
   for (size_t i = 0; i < in.wheels.size(); ++i) {
     const auto & now = in.wheels[i];
@@ -150,33 +159,39 @@ CycleOutput TractionCore::step(const CycleInput & in)
       w.torque = currentToTorque(w.current, w.omega, cfg.kt, cfg.i0);
     }
 
-    bool try_estimate = telemetry_ok && load > 0.0 && std::isfinite(w.omega) &&
+    const bool torque_usable = telemetry_ok && load > 0.0 && std::isfinite(w.omega) &&
       std::abs(w.omega) >= config_.omega_min && std::abs(w.current) > cfg.i0;
-    if (try_estimate && w.omega < 0.0) {
-      try_estimate = false;
+    if (torque_usable && w.omega < 0.0) {
       any_reverse = true;
     }
-    if (!try_estimate) {
+    if (!torque_usable || w.omega < 0.0) {
       warm_[i].reset();
       continue;
+    }
+
+    // Torque term first: it is available even when the estimator fails, which is its main job
+    // (see the header). With a valid estimate it agrees in sign with the slip term.
+    double e_i = kNaN;
+    if (std::isfinite(w.t_max) && w.t_max > 0.0) {
+      e_i = (w.torque - w.t_max) / w.t_max * w.s_max;
     }
 
     const auto est = estimator_.estimate(load, w.torque, warm_[i]);
-    if (!est.valid) {
+    if (est.valid) {
+      warm_[i] = WarmStart{est.s, est.theta_f};
+      w.estimate_valid = true;
+      w.slip_est = est.s;
+      w.theta_f = est.theta_f;
+      const double e_slip = w.slip_est - w.s_max;
+      e_i = std::isnan(e_i) ? e_slip : std::max(e_i, e_slip);
+    } else {
       warm_[i].reset();
-      continue;
     }
-    warm_[i] = WarmStart{est.s, est.theta_f};
-    w.estimate_valid = true;
-    w.slip_est = est.s;
-    w.theta_f = est.theta_f;
 
-    double e_i = w.slip_est - w.s_max;
-    if (std::isfinite(w.t_max) && w.t_max > 0.0) {
-      e_i = std::max(e_i, (w.torque - w.t_max) / w.t_max * w.s_max);
+    if (!std::isnan(e_i)) {
+      w.limiting = e_i > 0.0;
+      error = std::isnan(error) ? e_i : std::max(error, e_i);
     }
-    w.limiting = e_i > 0.0;
-    error = std::isnan(error) ? e_i : std::max(error, e_i);
   }
   if (any_reverse) {
     out.warnings.push_back("reversing, no estimate");
