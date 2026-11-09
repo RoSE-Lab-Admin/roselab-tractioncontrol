@@ -29,6 +29,9 @@ devel_isolated/
 /cfg/cpp/
 /cfg/*.py
 
+
+.claude/settings.local.json
+
 # Ignore generated docs
 *.dox
 *.wikidoc
